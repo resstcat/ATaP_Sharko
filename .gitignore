@@ -1,174 +1,127 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
+import streamlit as st
+import sqlite3
 
-# C extensions
-*.so
+# --- Ініціалізація БД ---
+def init_db():
+    conn = sqlite3.connect('users.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE
+        )
+    ''')
+    # Додаємо колонку password, якщо її ще немає
+    try:
+        cursor.execute('ALTER TABLE users ADD COLUMN password TEXT NOT NULL DEFAULT ""')
+        conn.commit()
+    except sqlite3.OperationalError:
+        # Колонка вже існує — ігноруємо
+        pass
+    conn.close()
 
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+# --- Безпечне додавання користувача ---
+def add_user(username, password):
+    try:
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
 
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
+        # Параметризований запит
+        cursor.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, password))
+        conn.commit()
+        st.success(f"Користувач '{username}' успішно доданий!")
+    except sqlite3.IntegrityError:
+        st.warning("Це ім'я користувача вже існує.")
+    except sqlite3.Error as e:
+        st.error(f"Помилка при додаванні користувача: {e}")
+    finally:
+        conn.close()
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
+# --- Увійти в систему ---
+def login_user(username, password):
+    try:
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
 
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-cover/
+        # Параметризований запит для входу
+        cursor.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, password))
+        user = cursor.fetchone()
+        return user is not None
+    except sqlite3.Error as e:
+        st.error(f"Помилка при вході: {e}")
+        return False
+    finally:
+        conn.close()
 
-# Translations
-*.mo
-*.pot
+# --- Показати всіх користувачів ---
+def show_users():
+    try:
+        conn = sqlite3.connect('users.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, username FROM users")
+        rows = cursor.fetchall()
+        for row in rows:
+            st.write(f"ID: {row[0]} | Username: {row[1]}")
+    except sqlite3.Error as e:
+        st.error(f"Помилка при отриманні користувачів: {e}")
+    finally:
+        conn.close()
 
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
+# --- Основна логіка Streamlit ---
+def main():
+    st.title("🛡️ Захист від SQL-ін’єкцій та обробка помилок у Python")
 
-# Flask stuff:
-instance/
-.webassets-cache
+    st.markdown("""
+    ###  Що таке SQL-ін’єкція?
+    SQL-ін’єкція — це атака, коли шкідливий код вставляється в SQL-запит, наприклад:  
+    `' OR '1'='1` ➜ дає доступ до облікового запису без правильного паролю.
 
-# Scrapy stuff:
-.scrapy
+    ###  Як захиститися?
+    -  **Не** створюйте запити через конкатенацію:
+        ```python
+        "SELECT * FROM users WHERE username = '" + username + "'"
+        ```
+    -  **Використовуйте параметризовані запити**:
+        ```python
+        cursor.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, password))
+        ```
+        Код захищає від атак типу:
+                
+        `' OR '1'='1` — класичний спосіб обійти автентифікацію.
 
-# Sphinx documentation
-docs/_build/
+        `admin' --` — коментар для відсікання частини запиту.
 
-# PyBuilder
-.pybuilder/
-target/
+        `' OR 1=1; --` — ін’єкція з логічним обчисленням.
 
-# Jupyter Notebook
-.ipynb_checkpoints
+        Будь-які інші маніпуляції через вставлення SQL-виразів у поля username або password.
 
-# IPython
-profile_default/
-ipython_config.py
+    ###  Додайте нового користувача:
+    """)
+    
+    with st.form("register_form"):
+        reg_username = st.text_input("Ім’я користувача для реєстрації")
+        reg_password = st.text_input("Пароль", type="password")
+        submitted = st.form_submit_button("Зареєструвати")
+        if submitted:
+            if reg_username and reg_password:
+                add_user(reg_username, reg_password)
+            else:
+                st.warning("Заповніть обидва поля!")
 
-# pyenv
-#   For a library or package, you might want to ignore these files since the code is
-#   intended to run in multiple environments; otherwise, check them in:
-# .python-version
+    st.markdown("### 🔐 Вхід в систему:")
+    with st.form("login_form"):
+        login_username = st.text_input("Ім’я користувача")
+        login_password = st.text_input("Пароль", type="password")
+        login_submitted = st.form_submit_button("Увійти")
+        if login_submitted:
+            if login_user(login_username, login_password):
+                st.success(f"Ласкаво просимо, {login_username}!")
+            else:
+                st.error("Невірне ім’я користувача або пароль.")
 
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-#Pipfile.lock
+    st.markdown("### 👥 Список зареєстрованих користувачів:")
+    show_users()
 
-# UV
-#   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#uv.lock
-
-# poetry
-#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
-#poetry.lock
-
-# pdm
-#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
-#pdm.lock
-#   pdm stores project-wide configurations in .pdm.toml, but it is recommended to not include it
-#   in version control.
-#   https://pdm.fming.dev/latest/usage/project/#working-with-version-control
-.pdm.toml
-.pdm-python
-.pdm-build/
-
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
-__pypackages__/
-
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath parsed files
-*.sage.py
-
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# pytype static type analyzer
-.pytype/
-
-# Cython debug symbols
-cython_debug/
-
-# PyCharm
-#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
-
-# Ruff stuff:
-.ruff_cache/
-
-# PyPI configuration file
-.pypirc
+if __name__ == "__main__":
+    init_db()
+    main()
